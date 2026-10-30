@@ -1,0 +1,274 @@
+// =============================================================================
+// DAX Measures: dim_employee (SCD Type 2)
+// Table Columns: employee_record_id, employee_id, org_id, first_name, last_name,
+//                department_id, job_level, employment_type, hire_date,
+//                termination_date, termination_reason, effective_from,
+//                effective_to, is_current
+// Context: Connected to dim_date[Date] (Active: hire_date; Inactive: termination_date, effective_from)
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Headcount & SCD Type 2 Record Counts
+// -----------------------------------------------------------------------------
+
+Total Unique Employees (All-Time) =
+DISTINCTCOUNT ( dim_employee[employee_id] )
+
+
+Current Active Employees =
+CALCULATE (
+    DISTINCTCOUNT ( dim_employee[employee_id] ),
+    dim_employee[is_current] = TRUE (),
+    ISBLANK ( dim_employee[termination_date] )
+)
+
+
+Total Terminated Employees (All-Time) =
+CALCULATE (
+    DISTINCTCOUNT ( dim_employee[employee_id] ),
+    dim_employee[is_current] = TRUE (),
+    NOT ISBLANK ( dim_employee[termination_date] )
+)
+
+
+Total SCD2 Employee Records =
+COUNTROWS ( dim_employee )
+
+
+// -----------------------------------------------------------------------------
+// 2. Hiring Metrics & Time Intelligence (via dim_date)
+// -----------------------------------------------------------------------------
+
+New Hires =
+VAR MinDate = MIN ( dim_date[Date] )
+VAR MaxDate = MAX ( dim_date[Date] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( dim_employee[employee_id] ),
+        dim_employee[is_current] = TRUE (),
+        dim_employee[hire_date] >= MinDate && dim_employee[hire_date] <= MaxDate
+    )
+
+
+New Hires YTD =
+TOTALYTD ( [New Hires], dim_date[Date] )
+
+
+New Hires PY =
+CALCULATE (
+    [New Hires],
+    SAMEPERIODLASTYEAR ( dim_date[Date] )
+)
+
+
+New Hires YoY Change =
+VAR CurrentHires = [New Hires]
+VAR PriorHires = [New Hires PY]
+RETURN
+    IF (
+        NOT ISBLANK ( CurrentHires ) && NOT ISBLANK ( PriorHires ),
+        CurrentHires - PriorHires
+    )
+
+
+New Hires YoY % =
+DIVIDE (
+    [New Hires YoY Change],
+    [New Hires PY],
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 3. Termination & Attrition Breakdown (by Termination Reason & Date)
+// -----------------------------------------------------------------------------
+
+Terminations in Period =
+VAR MinDate = MIN ( dim_date[Date] )
+VAR MaxDate = MAX ( dim_date[Date] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( dim_employee[employee_id] ),
+        dim_employee[is_current] = TRUE (),
+        NOT ISBLANK ( dim_employee[termination_date] ),
+        dim_employee[termination_date] >= MinDate && dim_employee[termination_date] <= MaxDate
+    )
+
+
+Terminations PY =
+CALCULATE (
+    [Terminations in Period],
+    SAMEPERIODLASTYEAR ( dim_date[Date] )
+)
+
+
+Terminations YoY % =
+DIVIDE (
+    [Terminations in Period] - [Terminations PY],
+    [Terminations PY],
+    0
+)
+
+
+Voluntary Terminations =
+VAR MinDate = MIN ( dim_date[Date] )
+VAR MaxDate = MAX ( dim_date[Date] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( dim_employee[employee_id] ),
+        dim_employee[is_current] = TRUE (),
+        dim_employee[termination_date] >= MinDate && dim_employee[termination_date] <= MaxDate,
+        LEFT ( dim_employee[termination_reason], 9 ) = "Voluntary"
+    )
+
+
+Involuntary Terminations =
+VAR MinDate = MIN ( dim_date[Date] )
+VAR MaxDate = MAX ( dim_date[Date] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( dim_employee[employee_id] ),
+        dim_employee[is_current] = TRUE (),
+        dim_employee[termination_date] >= MinDate && dim_employee[termination_date] <= MaxDate,
+        LEFT ( dim_employee[termination_reason], 11 ) = "Involuntary"
+    )
+
+
+Voluntary Termination Share % =
+DIVIDE (
+    [Voluntary Terminations],
+    [Terminations in Period],
+    0
+)
+
+
+Involuntary Termination Share % =
+DIVIDE (
+    [Involuntary Terminations],
+    [Terminations in Period],
+    0
+)
+
+
+Net Headcount Change (Hires - Terminations) =
+[New Hires] - [Terminations in Period]
+
+
+// -----------------------------------------------------------------------------
+// 4. Promotions & Role Changes (SCD Type 2 History)
+// -----------------------------------------------------------------------------
+
+Promoted or Transferred Employees =
+CALCULATE (
+    DISTINCTCOUNT ( dim_employee[employee_id] ),
+    dim_employee[is_current] = FALSE ()
+)
+
+
+Promotions in Period =
+VAR MinDate = MIN ( dim_date[Date] )
+VAR MaxDate = MAX ( dim_date[Date] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( dim_employee[employee_id] ),
+        dim_employee[is_current] = TRUE (),
+        dim_employee[effective_from] > dim_employee[hire_date],
+        dim_employee[effective_from] >= MinDate && dim_employee[effective_from] <= MaxDate
+    )
+
+
+Overall Promotion Rate % =
+DIVIDE (
+    [Promoted or Transferred Employees],
+    [Total Unique Employees (All-Time)],
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 5. Tenure Metrics
+// -----------------------------------------------------------------------------
+
+Average Active Tenure (Years) =
+VAR AsOfDate = COALESCE ( MAX ( dim_date[Date] ), TODAY () )
+RETURN
+    CALCULATE (
+        AVERAGEX (
+            dim_employee,
+            DIVIDE ( DATEDIFF ( dim_employee[hire_date], AsOfDate, DAY ), 365.25 )
+        ),
+        dim_employee[is_current] = TRUE (),
+        ISBLANK ( dim_employee[termination_date] )
+    )
+
+
+Average Tenure at Termination (Years) =
+CALCULATE (
+    AVERAGEX (
+        dim_employee,
+        DIVIDE ( DATEDIFF ( dim_employee[hire_date], dim_employee[termination_date], DAY ), 365.25 )
+    ),
+    dim_employee[is_current] = TRUE (),
+    NOT ISBLANK ( dim_employee[termination_date] )
+)
+
+
+// -----------------------------------------------------------------------------
+// 6. Employment Type & Job Level Mix (Current Active Workforce)
+// -----------------------------------------------------------------------------
+
+Full-Time Active Employees =
+CALCULATE (
+    [Current Active Employees],
+    dim_employee[employment_type] = "Full-Time"
+)
+
+
+Part-Time Active Employees =
+CALCULATE (
+    [Current Active Employees],
+    dim_employee[employment_type] = "Part-Time"
+)
+
+
+Contract Active Employees =
+CALCULATE (
+    [Current Active Employees],
+    dim_employee[employment_type] = "Contract"
+)
+
+
+Intern Active Employees =
+CALCULATE (
+    [Current Active Employees],
+    dim_employee[employment_type] = "Intern"
+)
+
+
+Full-Time Share % =
+DIVIDE (
+    [Full-Time Active Employees],
+    [Current Active Employees],
+    0
+)
+
+
+Leadership Headcount (Lead, Director, Executive) =
+CALCULATE (
+    [Current Active Employees],
+    dim_employee[job_level] IN { "Lead/Manager", "Director", "Executive" }
+)
+
+
+Span of Control (ICs per Leader) =
+VAR IndividualContributors =
+    CALCULATE (
+        [Current Active Employees],
+        dim_employee[job_level] IN { "Associate", "Intermediate", "Senior" }
+    )
+RETURN
+    DIVIDE (
+        IndividualContributors,
+        [Leadership Headcount (Lead, Director, Executive)],
+        0
+    )

@@ -1,0 +1,125 @@
+// =============================================================================
+// DAX Measures: security_mapping
+// Table Columns: user_email, org_id, access_level (HR_ADMIN, HR_VIEWER)
+// Context: Used for Row-Level Security (RLS) and Access Governance reporting
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Mapped User & Access Level Counts
+// -----------------------------------------------------------------------------
+
+Total Mapped Users =
+DISTINCTCOUNT ( security_mapping[user_email] )
+
+
+HR Admin Users =
+CALCULATE (
+    [Total Mapped Users],
+    security_mapping[access_level] = "HR_ADMIN"
+)
+
+
+HR Viewer Users =
+CALCULATE (
+    [Total Mapped Users],
+    security_mapping[access_level] = "HR_VIEWER"
+)
+
+
+HR Admin Share % =
+DIVIDE (
+    [HR Admin Users],
+    [Total Mapped Users],
+    0
+)
+
+
+HR Viewer Share % =
+DIVIDE (
+    [HR Viewer Users],
+    [Total Mapped Users],
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 2. Organisation Security Coverage Metrics
+// -----------------------------------------------------------------------------
+
+Organisations with Security Mapping =
+DISTINCTCOUNT ( security_mapping[org_id] )
+
+
+Avg Mapped Users per Organisation =
+DIVIDE (
+    [Total Mapped Users],
+    [Organisations with Security Mapping],
+    0
+)
+
+
+Organisations with HR Admin Coverage =
+CALCULATE (
+    DISTINCTCOUNT ( security_mapping[org_id] ),
+    security_mapping[access_level] = "HR_ADMIN"
+)
+
+
+Security Coverage Rate % =
+DIVIDE (
+    [Organisations with Security Mapping],
+    DISTINCTCOUNT ( organisations[org_id] ),
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 3. Dynamic Row-Level Security (RLS) & User Context Measures
+// -----------------------------------------------------------------------------
+
+Current Logged-In User Email =
+USERPRINCIPALNAME ()
+
+
+Current User Access Level =
+VAR CurrentUserEmail = LOWER ( TRIM ( USERPRINCIPALNAME () ) )
+RETURN
+    COALESCE (
+        CALCULATE (
+            MAX ( security_mapping[access_level] ),
+            LOWER ( security_mapping[user_email] ) = CurrentUserEmail
+        ),
+        "NO_ACCESS"
+    )
+
+
+Current User Organisation ID =
+VAR CurrentUserEmail = LOWER ( TRIM ( USERPRINCIPALNAME () ) )
+RETURN
+    CALCULATE (
+        MAX ( security_mapping[org_id] ),
+        LOWER ( security_mapping[user_email] ) = CurrentUserEmail
+    )
+
+
+Is Current User HR Admin =
+[Current User Access Level] = "HR_ADMIN"
+
+
+RLS Organisation Access Filter =
+// Can be used in visual-level filters (equals 1) or as reference for Manage Roles RLS
+VAR CurrentUserEmail = LOWER ( TRIM ( USERPRINCIPALNAME () ) )
+VAR UserOrgList =
+    CALCULATETABLE (
+        VALUES ( security_mapping[org_id] ),
+        REMOVEFILTERS ( security_mapping ),
+        LOWER ( security_mapping[user_email] ) = CurrentUserEmail
+    )
+RETURN
+    IF (
+        COUNTROWS (
+            INTERSECT ( VALUES ( organisations[org_id] ), UserOrgList )
+        ) > 0,
+        1,
+        0
+    )

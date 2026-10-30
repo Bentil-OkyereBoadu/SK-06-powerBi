@@ -1,0 +1,235 @@
+// =============================================================================
+// DAX Measures: fact_employee_monthly
+// Table Columns: snapshot_month, employee_id, org_id, is_active,
+//                base_salary_usd, job_level, department_id
+// Context: Connected to dim_date[Date] on fact_employee_monthly[snapshot_month]
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Semi-Additive Headcount Measures (Period-End & Average)
+// -----------------------------------------------------------------------------
+
+Active Headcount (EOP) =
+VAR LatestSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+        fact_employee_monthly[snapshot_month] = LatestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Active Headcount (BOP) =
+VAR EarliestSnapshot = MIN ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+        fact_employee_monthly[snapshot_month] = EarliestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Average Monthly Active Headcount =
+AVERAGEX (
+    VALUES ( fact_employee_monthly[snapshot_month] ),
+    CALCULATE (
+        DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+)
+
+
+// -----------------------------------------------------------------------------
+// 2. Headcount Time Intelligence (YoY & MoM via dim_date)
+// -----------------------------------------------------------------------------
+
+Active Headcount PY =
+VAR CurrentSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+VAR PriorYearSnapshot = EOMONTH ( CurrentSnapshot, -12 )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+        ALL ( dim_date ),
+        fact_employee_monthly[snapshot_month] = PriorYearSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Active Headcount YoY Change =
+VAR CurrHC = [Active Headcount (EOP)]
+VAR PriorHC = [Active Headcount PY]
+RETURN
+    IF (
+        NOT ISBLANK ( CurrHC ) && NOT ISBLANK ( PriorHC ),
+        CurrHC - PriorHC
+    )
+
+
+Active Headcount YoY Growth % =
+DIVIDE (
+    [Active Headcount YoY Change],
+    [Active Headcount PY],
+    0
+)
+
+
+Active Headcount PM =
+VAR CurrentSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+VAR PriorMonthSnapshot = EOMONTH ( CurrentSnapshot, -1 )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+        ALL ( dim_date ),
+        fact_employee_monthly[snapshot_month] = PriorMonthSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Active Headcount MoM Change =
+VAR CurrHC = [Active Headcount (EOP)]
+VAR PriorMonthHC = [Active Headcount PM]
+RETURN
+    IF (
+        NOT ISBLANK ( CurrHC ) && NOT ISBLANK ( PriorMonthHC ),
+        CurrHC - PriorMonthHC
+    )
+
+
+Active Headcount MoM Growth % =
+DIVIDE (
+    [Active Headcount MoM Change],
+    [Active Headcount PM],
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 3. Turnover & Retention Metrics (From Monthly Snapshots)
+//    Note: In fact_employee_monthly, an employee's termination month is
+//          recorded with is_active = FALSE.
+// -----------------------------------------------------------------------------
+
+Snapshot Terminations =
+CALCULATE (
+    DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+    fact_employee_monthly[is_active] = FALSE ()
+)
+
+
+Snapshot Terminations PY =
+CALCULATE (
+    [Snapshot Terminations],
+    SAMEPERIODLASTYEAR ( dim_date[Date] )
+)
+
+
+Turnover Rate % =
+DIVIDE (
+    [Snapshot Terminations],
+    [Average Monthly Active Headcount],
+    0
+)
+
+
+Annualized Turnover Rate % =
+VAR MonthsInContext = DISTINCTCOUNT ( fact_employee_monthly[snapshot_month] )
+RETURN
+    DIVIDE (
+        [Snapshot Terminations] * DIVIDE ( 12, MonthsInContext, 1 ),
+        [Average Monthly Active Headcount],
+        0
+    )
+
+
+Retention Rate % =
+VAR Turnover = [Turnover Rate %]
+RETURN
+    IF ( NOT ISBLANK ( Turnover ), 1 - Turnover )
+
+
+// -----------------------------------------------------------------------------
+// 4. Compensation & Payroll Metrics (USD)
+// -----------------------------------------------------------------------------
+
+Annualized Payroll Run-Rate (USD) =
+VAR LatestSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        SUM ( fact_employee_monthly[base_salary_usd] ),
+        fact_employee_monthly[snapshot_month] = LatestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Actual Monthly Salary Expense (USD) =
+SUMX (
+    VALUES ( fact_employee_monthly[snapshot_month] ),
+    CALCULATE (
+        DIVIDE ( SUM ( fact_employee_monthly[base_salary_usd] ), 12 ),
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+)
+
+
+Salary Expense YTD (USD) =
+TOTALYTD ( [Actual Monthly Salary Expense (USD)], dim_date[Date] )
+
+
+Average Base Salary (USD) =
+VAR LatestSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        AVERAGE ( fact_employee_monthly[base_salary_usd] ),
+        fact_employee_monthly[snapshot_month] = LatestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Median Base Salary (USD) =
+VAR LatestSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        MEDIAN ( fact_employee_monthly[base_salary_usd] ),
+        fact_employee_monthly[snapshot_month] = LatestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Min Base Salary (USD) =
+VAR LatestSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        MIN ( fact_employee_monthly[base_salary_usd] ),
+        fact_employee_monthly[snapshot_month] = LatestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Max Base Salary (USD) =
+VAR LatestSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+RETURN
+    CALCULATE (
+        MAX ( fact_employee_monthly[base_salary_usd] ),
+        fact_employee_monthly[snapshot_month] = LatestSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Average Base Salary PY (USD) =
+VAR CurrentSnapshot = MAX ( fact_employee_monthly[snapshot_month] )
+VAR PriorYearSnapshot = EOMONTH ( CurrentSnapshot, -12 )
+RETURN
+    CALCULATE (
+        AVERAGE ( fact_employee_monthly[base_salary_usd] ),
+        ALL ( dim_date ),
+        fact_employee_monthly[snapshot_month] = PriorYearSnapshot,
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+
+
+Average Base Salary YoY Growth % =
+DIVIDE (
+    [Average Base Salary (USD)] - [Average Base Salary PY (USD)],
+    [Average Base Salary PY (USD)],
+    0
+)

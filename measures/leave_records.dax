@@ -1,0 +1,203 @@
+// =============================================================================
+// DAX Measures: dim_leave_record
+// Table Columns: leave_id, employee_id, org_id, leave_type, start_date,
+//                end_date, days_taken, approved_by
+// Context: Connected to dim_date[Date] on dim_leave_record[start_date]
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Core Leave Volume & Duration Metrics
+// -----------------------------------------------------------------------------
+
+Total Leave Requests =
+DISTINCTCOUNT ( dim_leave_record[leave_id] )
+
+
+Total Leave Days =
+SUM ( dim_leave_record[days_taken] )
+
+
+Average Leave Duration (Days) =
+AVERAGE ( dim_leave_record[days_taken] )
+
+
+Employees Taking Leave =
+DISTINCTCOUNT ( dim_leave_record[employee_id] )
+
+
+Distinct Leave Approvers =
+DISTINCTCOUNT ( dim_leave_record[approved_by] )
+
+
+// -----------------------------------------------------------------------------
+// 2. Leave Time Intelligence & Moving Averages (via dim_date)
+// -----------------------------------------------------------------------------
+
+Leave Days YTD =
+TOTALYTD ( [Total Leave Days], dim_date[Date] )
+
+
+Leave Days PY =
+CALCULATE (
+    [Total Leave Days],
+    SAMEPERIODLASTYEAR ( dim_date[Date] )
+)
+
+
+Leave Days YoY Change =
+VAR CurrDays = [Total Leave Days]
+VAR PriorDays = [Leave Days PY]
+RETURN
+    IF (
+        NOT ISBLANK ( CurrDays ) && NOT ISBLANK ( PriorDays ),
+        CurrDays - PriorDays
+    )
+
+
+Leave Days YoY % =
+DIVIDE (
+    [Leave Days YoY Change],
+    [Leave Days PY],
+    0
+)
+
+
+Leave Days (3M Moving Avg) =
+VAR LatestDate = MAX ( dim_date[Date] )
+VAR ThreeMonthWindow =
+    DATESINPERIOD (
+        dim_date[Date],
+        LatestDate,
+        -3,
+        MONTH
+    )
+RETURN
+    CALCULATE (
+        AVERAGEX (
+            VALUES ( dim_date[Month Name] ),
+            [Total Leave Days]
+        ),
+        ThreeMonthWindow
+    )
+
+
+// -----------------------------------------------------------------------------
+// 3. Leave Days by Leave Type
+//    Values: Annual Leave, Sick Leave, Parental Leave, Compassionate Leave,
+//            Unpaid Leave, Study Leave
+// -----------------------------------------------------------------------------
+
+Annual Leave Days =
+CALCULATE (
+    [Total Leave Days],
+    dim_leave_record[leave_type] = "Annual Leave"
+)
+
+
+Sick Leave Days =
+CALCULATE (
+    [Total Leave Days],
+    dim_leave_record[leave_type] = "Sick Leave"
+)
+
+
+Parental Leave Days =
+CALCULATE (
+    [Total Leave Days],
+    dim_leave_record[leave_type] = "Parental Leave"
+)
+
+
+Compassionate Leave Days =
+CALCULATE (
+    [Total Leave Days],
+    dim_leave_record[leave_type] = "Compassionate Leave"
+)
+
+
+Unpaid Leave Days =
+CALCULATE (
+    [Total Leave Days],
+    dim_leave_record[leave_type] = "Unpaid Leave"
+)
+
+
+Study Leave Days =
+CALCULATE (
+    [Total Leave Days],
+    dim_leave_record[leave_type] = "Study Leave"
+)
+
+
+// -----------------------------------------------------------------------------
+// 4. Leave Utilization & Absenteeism Rates
+// -----------------------------------------------------------------------------
+
+Leave Type Share % =
+DIVIDE (
+    [Total Leave Days],
+    CALCULATE (
+        [Total Leave Days],
+        ALLSELECTED ( dim_leave_record[leave_type] )
+    ),
+    0
+)
+
+
+Sick Leave Share % =
+DIVIDE (
+    [Sick Leave Days],
+    [Total Leave Days],
+    0
+)
+
+
+Average Leave Days per Active Employee =
+VAR AvgActiveHC =
+    AVERAGEX (
+        VALUES ( fact_employee_monthly[snapshot_month] ),
+        CALCULATE (
+            DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+            fact_employee_monthly[is_active] = TRUE ()
+        )
+    )
+RETURN
+    DIVIDE ( [Total Leave Days], AvgActiveHC, 0 )
+
+
+Leave Participation Rate % =
+VAR AvgActiveHC =
+    AVERAGEX (
+        VALUES ( fact_employee_monthly[snapshot_month] ),
+        CALCULATE (
+            DISTINCTCOUNT ( fact_employee_monthly[employee_id] ),
+            fact_employee_monthly[is_active] = TRUE ()
+        )
+    )
+RETURN
+    DIVIDE ( [Employees Taking Leave], AvgActiveHC, 0 )
+
+
+Absenteeism Rate (Sick Leave % of Working Days) =
+VAR ActiveEmployeeMonths =
+    CALCULATE (
+        COUNTROWS ( fact_employee_monthly ),
+        fact_employee_monthly[is_active] = TRUE ()
+    )
+VAR AvailableWorkingDays = ActiveEmployeeMonths * 21.67
+RETURN
+    DIVIDE ( [Sick Leave Days], AvailableWorkingDays, 0 )
+
+
+Leave Utilization % = 
+VAR EmployeesTakingLeave = 
+    DISTINCTCOUNT ( dim_leave_record[employee_id] )
+VAR TotalActiveEmployees =
+    CALCULATE (
+        DISTINCTCOUNT ( dim_employee[employee_id] ),
+        REMOVEFILTERS ( dim_leave_record[leave_type] ),
+        dim_employee[is_current] = TRUE (),
+        ISBLANK ( dim_employee[termination_date] )
+    )
+RETURN
+    DIVIDE ( EmployeesTakingLeave, TotalActiveEmployees, 0 )

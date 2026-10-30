@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: cloudhr-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres     # local learning container only — never reuse in real systems
+      POSTGRES_DB: cloudhr
+    ports:
+      - "5434:5432"                   # CloudHR connects to localhost:5434
+    volumes:
+      - cloudhr_pgdata:/var/lib/postgresql/data
+      - ./data:/data:ro
+      - ./sql:/sql:ro
+
+volumes:
+  cloudhr_pgdata:

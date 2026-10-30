@@ -1,0 +1,122 @@
+// =============================================================================
+// DAX Measures: organisations
+// Table Columns: org_id, org_name, industry, employee_count_band, country, subscription_tier
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Core Organisation Counts
+// -----------------------------------------------------------------------------
+
+Total Organisations =
+DISTINCTCOUNT ( organisations[org_id] )
+
+
+Total Industries =
+DISTINCTCOUNT ( organisations[industry] )
+
+
+Total Countries =
+DISTINCTCOUNT ( organisations[country] )
+
+
+// -----------------------------------------------------------------------------
+// 2. Subscription Tier Breakdown & Mix %
+// -----------------------------------------------------------------------------
+
+Enterprise Organisations =
+CALCULATE (
+    [Total Organisations],
+    organisations[subscription_tier] = "Enterprise"
+)
+
+
+Professional Organisations =
+CALCULATE (
+    [Total Organisations],
+    organisations[subscription_tier] = "Professional"
+)
+
+
+Growth Organisations =
+CALCULATE (
+    [Total Organisations],
+    organisations[subscription_tier] = "Growth"
+)
+
+
+Starter Organisations =
+CALCULATE (
+    [Total Organisations],
+    organisations[subscription_tier] = "Starter"
+)
+
+
+Enterprise Tier Share % =
+DIVIDE (
+    [Enterprise Organisations],
+    [Total Organisations],
+    0
+)
+
+
+Organisation Share % =
+DIVIDE (
+    [Total Organisations],
+    CALCULATE ( [Total Organisations], ALL ( organisations ) ),
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 3. Organisation Size Band Counts
+// -----------------------------------------------------------------------------
+
+Large Enterprise Orgs (1000+ Employees) =
+CALCULATE (
+    [Total Organisations],
+    organisations[employee_count_band] IN { "1001-5000", "5001-10000", "1000+" }
+)
+
+
+Mid-Market Orgs (201-1000 Employees) =
+CALCULATE (
+    [Total Organisations],
+    organisations[employee_count_band] IN { "201-500", "501-1000" }
+)
+
+
+SMB Orgs (50-200 Employees) =
+CALCULATE (
+    [Total Organisations],
+    organisations[employee_count_band] IN { "1-50", "50-200", "51-200" }
+)
+
+
+// -----------------------------------------------------------------------------
+// 4. Cross-Table Organisation Metrics
+// -----------------------------------------------------------------------------
+
+Active Organisations (With Active Headcount) =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[org_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE ()
+    )
+
+
+Avg Active Employees per Organisation =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+VAR ActiveEmps =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE ()
+    )
+RETURN
+    DIVIDE ( ActiveEmps, [Active Organisations (With Active Headcount)], 0 )
+
+
+Selected Organisation Name =
+SELECTEDVALUE ( organisations[org_name], "All Organisations" )

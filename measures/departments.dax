@@ -1,0 +1,157 @@
+// =============================================================================
+// DAX Measures: departments
+// Table Columns: department_id, org_id, department_name, department_group, cost_centre
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Department & Cost Centre Counts
+// -----------------------------------------------------------------------------
+
+Total Departments =
+DISTINCTCOUNT ( departments[department_id] )
+
+
+Unique Department Names =
+DISTINCTCOUNT ( departments[department_name] )
+
+
+Total Department Groups =
+DISTINCTCOUNT ( departments[department_group] )
+
+
+Total Cost Centres =
+DISTINCTCOUNT ( departments[cost_centre] )
+
+
+Avg Departments per Organisation =
+DIVIDE (
+    [Total Departments],
+    DISTINCTCOUNT ( departments[org_id] ),
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 2. Department Group Counts
+// -----------------------------------------------------------------------------
+
+R&D Departments =
+CALCULATE (
+    [Total Departments],
+    departments[department_group] = "R&D"
+)
+
+
+Sales & Marketing Departments =
+CALCULATE (
+    [Total Departments],
+    departments[department_group] = "Sales & Marketing"
+)
+
+
+Operations Departments =
+CALCULATE (
+    [Total Departments],
+    departments[department_group] = "Operations"
+)
+
+
+G&A Departments =
+CALCULATE (
+    [Total Departments],
+    departments[department_group] = "G&A"
+)
+
+
+// -----------------------------------------------------------------------------
+// 3. Departmental Workforce & Payroll Distribution
+// -----------------------------------------------------------------------------
+
+Avg Active Headcount per Department =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+VAR ActiveHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE ()
+    )
+RETURN
+    DIVIDE ( ActiveHeadcount, [Total Departments], 0 )
+
+
+Department Headcount Share % =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+VAR DeptHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE ()
+    )
+VAR OrgTotalHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE (),
+        ALL ( departments )
+    )
+RETURN
+    DIVIDE ( DeptHeadcount, OrgTotalHeadcount, 0 )
+
+
+Department Salary Cost Share % =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+VAR DeptSalary =
+    CALCULATE (
+        SUM ( employee_monthly_snapshots[base_salary_usd] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE ()
+    )
+VAR OrgTotalSalary =
+    CALCULATE (
+        SUM ( employee_monthly_snapshots[base_salary_usd] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE (),
+        ALL ( departments )
+    )
+RETURN
+    DIVIDE ( DeptSalary, OrgTotalSalary, 0 )
+
+
+R&D Headcount Ratio % =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+VAR RDHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE (),
+        departments[department_group] = "R&D"
+    )
+VAR TotalHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE (),
+        ALL ( departments )
+    )
+RETURN
+    DIVIDE ( RDHeadcount, TotalHeadcount, 0 )
+
+
+G&A Overhead Headcount Ratio % =
+VAR LatestSnapshot = MAX ( employee_monthly_snapshots[snapshot_month] )
+VAR GAHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE (),
+        departments[department_group] = "G&A"
+    )
+VAR TotalHeadcount =
+    CALCULATE (
+        DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+        employee_monthly_snapshots[snapshot_month] = LatestSnapshot,
+        employee_monthly_snapshots[is_active] = TRUE (),
+        ALL ( departments )
+    )
+RETURN
+    DIVIDE ( GAHeadcount, TotalHeadcount, 0 )

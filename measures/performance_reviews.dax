@@ -1,0 +1,160 @@
+// =============================================================================
+// DAX Measures: dim_performance_review
+// Table Columns: review_id, employee_id, org_id, review_year, rating (1-5), reviewer_id
+// Context: Supports filtering directly by dim_performance_review[review_year] or via dim_date[Year]
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. Core Review Volume & Coverage Metrics
+// -----------------------------------------------------------------------------
+
+Total Performance Reviews =
+CALCULATE (
+    DISTINCTCOUNT ( dim_performance_review[review_id] ),
+    TREATAS ( VALUES ( dim_date[Year] ), dim_performance_review[review_year] )
+)
+
+
+Employees Reviewed =
+CALCULATE (
+    DISTINCTCOUNT ( dim_performance_review[employee_id] ),
+    TREATAS ( VALUES ( dim_date[Year] ), dim_performance_review[review_year] )
+)
+
+
+Distinct Reviewers =
+CALCULATE (
+    DISTINCTCOUNT ( dim_performance_review[reviewer_id] ),
+    TREATAS ( VALUES ( dim_date[Year] ), dim_performance_review[review_year] )
+)
+
+
+Average Reviews per Reviewer =
+DIVIDE (
+    [Total Performance Reviews],
+    [Distinct Reviewers],
+    0
+)
+
+
+Review Completion Coverage % =
+VAR AvgActiveHC =
+    AVERAGEX (
+        VALUES ( employee_monthly_snapshots[snapshot_month] ),
+        CALCULATE (
+            DISTINCTCOUNT ( employee_monthly_snapshots[employee_id] ),
+            employee_monthly_snapshots[is_active] = TRUE ()
+        )
+    )
+RETURN
+    DIVIDE ( [Employees Reviewed], AvgActiveHC, 0 )
+
+
+// -----------------------------------------------------------------------------
+// 2. Rating Score Metrics & YoY Comparison
+// -----------------------------------------------------------------------------
+
+Average Performance Rating =
+CALCULATE (
+    AVERAGE ( dim_performance_review[rating] ),
+    TREATAS ( VALUES ( dim_date[Year] ), dim_performance_review[review_year] )
+)
+
+
+Median Performance Rating =
+CALCULATE (
+    MEDIAN ( dim_performance_review[rating] ),
+    TREATAS ( VALUES ( dim_date[Year] ), dim_performance_review[review_year] )
+)
+
+
+Average Performance Rating PY =
+VAR SelectedYear = COALESCE ( MAX ( dim_date[Year] ), MAX ( dim_performance_review[review_year] ) )
+RETURN
+    CALCULATE (
+        AVERAGE ( dim_performance_review[rating] ),
+        ALL ( dim_date ),
+        dim_performance_review[review_year] = SelectedYear - 1
+    )
+
+
+Average Performance Rating YoY Change =
+VAR CurrRating = [Average Performance Rating]
+VAR PriorRating = [Average Performance Rating PY]
+RETURN
+    IF (
+        NOT ISBLANK ( CurrRating ) && NOT ISBLANK ( PriorRating ),
+        CurrRating - PriorRating
+    )
+
+
+Average Performance Rating YoY % =
+DIVIDE (
+    [Average Performance Rating YoY Change],
+    [Average Performance Rating PY],
+    0
+)
+
+
+// -----------------------------------------------------------------------------
+// 3. Rating Tier Distribution (1 to 5 Scale)
+// -----------------------------------------------------------------------------
+
+High Performers (Rating 4-5) =
+CALCULATE (
+    [Total Performance Reviews],
+    dim_performance_review[rating] IN { 4, 5 }
+)
+
+
+Top Performers (Rating 5) =
+CALCULATE (
+    [Total Performance Reviews],
+    dim_performance_review[rating] = 5
+)
+
+
+Solid Performers (Rating 3) =
+CALCULATE (
+    [Total Performance Reviews],
+    dim_performance_review[rating] = 3
+)
+
+
+Low Performers (Rating 1-2) =
+CALCULATE (
+    [Total Performance Reviews],
+    dim_performance_review[rating] IN { 1, 2 }
+)
+
+
+High Performer % =
+DIVIDE (
+    [High Performers (Rating 4-5)],
+    [Total Performance Reviews],
+    0
+)
+
+
+Top Performer (Rating 5) % =
+DIVIDE (
+    [Top Performers (Rating 5)],
+    [Total Performance Reviews],
+    0
+)
+
+
+Solid Performer (Rating 3) % =
+DIVIDE (
+    [Solid Performers (Rating 3)],
+    [Total Performance Reviews],
+    0
+)
+
+
+Low Performer % =
+DIVIDE (
+    [Low Performers (Rating 1-2)],
+    [Total Performance Reviews],
+    0
+)
